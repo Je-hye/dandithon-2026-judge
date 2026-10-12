@@ -134,6 +134,35 @@ Multi-agent 언급 시 '왜 multi-agent여야 하는지, 단순 API 호출과 �
 ]
 
 
+def _sanitize_json(text: str) -> str:
+    """JSON string 값 내부의 이스케이프되지 않은 제어 문자(개행 등)를 처리"""
+    result = []
+    in_string = False
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and in_string:
+            result.append(c)
+            i += 1
+            if i < len(text):
+                result.append(text[i])
+            i += 1
+            continue
+        if c == '"':
+            in_string = not in_string
+            result.append(c)
+        elif in_string and c == "\n":
+            result.append("\\n")
+        elif in_string and c == "\r":
+            result.append("\\r")
+        elif in_string and c == "\t":
+            result.append("\\t")
+        else:
+            result.append(c)
+        i += 1
+    return "".join(result)
+
+
 def get_judge_response(judge: dict, project_info: str) -> dict:
     system_prompt = f"""당신은 {judge['name']}({judge['role']}, {judge['background']})입니다.
 
@@ -159,9 +188,11 @@ def get_judge_response(judge: dict, project_info: str) -> dict:
   "killerQuestion": "발표장에서 내가 반드시 물어볼 질문 (날카롭게)"
 }}"""
 
+    # 항목이 많은 심사위원(기획 8개, 개발 11개)은 JSON이 길어서 넉넉하게 설정
+    max_tokens = 2500 if judge["max_score"] >= 30 else 1500
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1500,
+        max_tokens=max_tokens,
         system=system_prompt,
         messages=[{"role": "user", "content": f"다음 팀의 프로젝트를 심사해주세요:\n\n{project_info}"}],
     )
@@ -171,7 +202,11 @@ def get_judge_response(judge: dict, project_info: str) -> dict:
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
-    return json.loads(text.strip())
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_sanitize_json(text))
 
 
 def evaluate_all(project_info: str) -> dict:
