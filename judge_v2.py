@@ -8,8 +8,26 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import anthropic
 import streamlit as st
+from pptx import Presentation
 
 client = anthropic.Anthropic()
+
+
+def extract_pptx_text(file) -> str:
+    """업로드된 .pptx 파일에서 슬라이드별 텍스트를 추출"""
+    prs = Presentation(file)
+    slides_text = []
+    for i, slide in enumerate(prs.slides, 1):
+        texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    text = para.text.strip()
+                    if text:
+                        texts.append(text)
+        if texts:
+            slides_text.append(f"슬라이드 {i}:\n" + "\n".join(texts))
+    return "\n\n".join(slides_text) if slides_text else "슬라이드 내용 없음"
 
 
 def fetch_github_info(repo_url: str) -> str:
@@ -303,10 +321,10 @@ with st.form("project_form"):
         )
 
     with col2:
-        slides = st.text_area(
-            "PPT 슬라이드 구성",
-            placeholder="슬라이드별 제목과 핵심 내용을 입력하세요.\n예)\n1. 표지 — 서비스명 + 한 줄 소개\n2. 문제 정의 — ...\n3. 솔루션 — ...",
-            height=200,
+        ppt_file = st.file_uploader(
+            "PPT 파일 (.pptx)",
+            type=["pptx"],
+            help="슬라이드 텍스트를 자동으로 추출해 심사에 반영합니다.",
         )
         demo_url = st.text_input(
             "데모 URL (선택)",
@@ -325,14 +343,20 @@ if submitted:
         st.error("서비스 이름, 한 줄 소개, 발표 대본은 필수입니다.")
         st.stop()
 
+    slides_content = "미첨부"
+    if ppt_file is not None:
+        with st.spinner("PPT 텍스트 추출 중..."):
+            slides_content = extract_pptx_text(ppt_file)
+        st.caption(f"✅ PPT 연결됨: `{ppt_file.name}` ({len(slides_content)}자 추출)")
+
     project_info = f"""서비스명: {service_name}
 서비스 소개: {service_desc}
 
 --- 발표 대본 ---
 {script}
 
---- PPT 슬라이드 구성 ---
-{slides or '미기재'}
+--- PPT 슬라이드 내용 ---
+{slides_content}
 
 --- 링크 ---
 데모 URL: {demo_url or '없음'}
