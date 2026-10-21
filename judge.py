@@ -135,7 +135,7 @@ Multi-agent 언급 시 '왜 multi-agent여야 하는지, 단순 API 호출과 �
 
 
 def _sanitize_json(text: str) -> str:
-    """JSON string 값 내부의 이스케이프되지 않은 제어 문자(개행 등)를 처리"""
+    """JSON string 값 내부의 제어 문자와 이스케이프되지 않은 따옴표를 처리"""
     result = []
     in_string = False
     i = 0
@@ -149,8 +149,20 @@ def _sanitize_json(text: str) -> str:
             i += 1
             continue
         if c == '"':
-            in_string = not in_string
-            result.append(c)
+            if not in_string:
+                in_string = True
+                result.append(c)
+            else:
+                # 전방 탐색: 다음 비공백 문자가 JSON 구조 문자면 문자열 종료
+                j = i + 1
+                while j < len(text) and text[j] in " \t\r\n":
+                    j += 1
+                if j >= len(text) or text[j] in ":,}]":
+                    in_string = False
+                    result.append(c)
+                else:
+                    # 문자열 내부 따옴표 → 이스케이프
+                    result.append('\\"')
         elif in_string and c == "\n":
             result.append("\\n")
         elif in_string and c == "\r":
@@ -173,9 +185,10 @@ def get_judge_response(judge: dict, project_info: str) -> dict:
 
 총 {judge['max_score']}점을 담당합니다.
 
-주의: 아이디어 설명 단계이므로 실제 구현 여부를 알 수 없는 항목(배포, 코드 품질 등)은 계획의 현실성으로 평가합니다.
+주의: 아이디어가 확정된 단계입니다. 제시된 기획 내용을 바탕으로 평가하며, 배포·코드 품질 등 아직 구현되지 않은 항목은 계획의 구체성과 실현 가능성으로 평가합니다.
 
-응답은 반드시 아래 JSON 형식으로만 출력하세요. JSON 외 다른 텍스트 없이:
+응답은 반드시 아래 JSON 형식으로만 출력하세요. JSON 외 다른 텍스트 없이.
+주의: comment, verdict, strongPoint, weakness, killerQuestion 등 텍스트 필드 내에서 큰따옴표(")를 절대 사용하지 마세요. 인용이 필요하면 「」 또는 ''를 사용하세요.
 {{
   "totalScore": <숫자>,
   "maxScore": {judge['max_score']},
@@ -188,8 +201,8 @@ def get_judge_response(judge: dict, project_info: str) -> dict:
   "killerQuestion": "발표장에서 내가 반드시 물어볼 질문 (날카롭게)"
 }}"""
 
-    # 항목이 많은 심사위원(기획 8개, 개발 11개)은 JSON이 길어서 넉넉하게 설정
-    max_tokens = 2500 if judge["max_score"] >= 30 else 1500
+    # 기획(8항목)·개발(11항목)은 JSON이 길어서 넉넉하게 설정
+    max_tokens = 8192 if judge["max_score"] >= 30 else 1500
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=max_tokens,
